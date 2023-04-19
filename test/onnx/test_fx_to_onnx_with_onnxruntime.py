@@ -41,7 +41,9 @@ from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
+_InputArgsType = Optional[
+    Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
+]
 _OutputsType = Sequence[_NumericType]
 
 
@@ -105,8 +107,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: float,
-    rtol: float,
+    atol: Optional[float],
+    rtol: Optional[float],
     has_mutation: bool = False,
 ):
     if has_mutation:
@@ -141,8 +143,8 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     test_suite: TestFxToOnnxWithOnnxRuntime,
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
-    rtol: float = 1e-3,
-    atol: float = 1e-7,
+    rtol: Optional[float] = 1e-3,
+    atol: Optional[float] = 1e-7,
     opset_version: int = 18,
     has_mutation: bool = False,
     additional_test_inputs: Optional[Sequence[Sequence[_InputArgsType]]] = None,
@@ -335,13 +337,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
     # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
     # @unittest.expectedFailure
-    @pytorch_test_common.xfail(
-        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
-        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
-        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
-        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
-        "instance of <protocol 'torch.Tensor'>."
-    )
+    @pytorch_test_common.xfail("https://github.com/pytorch/pytorch/issues/99534")
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
