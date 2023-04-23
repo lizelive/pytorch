@@ -5737,24 +5737,33 @@ Tensor lu_unpack_backward(
 
 Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
+  at::TensorOptions options;
 
   auto materialized = tensors.materialize();
   auto any_defined = false;
   for (const Tensor& t : materialized) {
-    any_defined |= isFwGradDefined(t);
+    if (isFwGradDefined(t)) {
+      any_defined = true;
+      options = t.options();
+      break;
+    }
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
     for (const Tensor& t : materialized) {
+      if (t.sizes() == IntArrayRef({0})) {
+        continue;
+      }
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)
               : at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
-    out_fw_grad = at::cat(fw_grads, dim);
+    out_fw_grad = fw_grads.size() > 0 ? at::cat(fw_grads, dim)
+                                      : at::_efficientzerotensor({0}, options);
   }
 
   return out_fw_grad;
@@ -5786,8 +5795,6 @@ Tensor block_diag_jvp(at::TensorList tensors) {
 }
 
 Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
-  // Basically copy of cat_jvp above
-  // TOD0: consolidate with the logic of cat_jvp
   Tensor out_fw_grad;
 
   auto any_defined = false;
