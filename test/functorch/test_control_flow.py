@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+import functools
 import unittest
 
 import torch
@@ -297,6 +298,119 @@ class TestControlFlowTraced(TestCase):
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(torch.func.functionalize(f))(*example_inputs)
+
+    def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
+        def true_true_fn(x):
+            x.add_(4)
+            return x.sin().max()
+
+        def true_false_fn(x):
+            return x.cos().min()
+
+        def true_fn(x):
+            pred = x.shape[0] == 1
+            return cond(pred, true_true_fn, true_false_fn, [x])
+
+        def false_fn(x):
+            return x.sum()
+
+        def f(x):
+            pred = x.shape[0] == 1
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(4, 5)
+        example_input_func = torch._to_functional_tensor(example_input, mirror_autograd_meta=True)
+        torch._enable_functionalization(reapply_views=False)
+        try:
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+                f(example_input_func)
+
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+                make_fx(f)(example_input_func)
+        finally:
+            torch._disable_functionalization()
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            make_fx(f_wrapper(f))(example_input_func)
+
+    def test_cond_functionalized_input_aliasing_with_aot_func(self):
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            view_x = x.view(x.shape)
+            return view_x
+
+        def f(x):
+            pred = x.shape[0] == 4
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(5, 5)
+        example_input_func = torch._to_functional_tensor(example_input, mirror_autograd_meta=True)
+        torch._enable_functionalization(reapply_views=False)
+        try:
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+                f(example_input_func)
+        finally:
+            torch._disable_functionalization()
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+            make_fx(f_wrapper(f))(example_input_func)
+
+    def test_cond_functionalized_aot_func_check_functional(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            y = x.sin()
+            y.add_(5)
+            return y
+
+        def f(x):
+            pred = x.shape[0] == 4
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(5, 5)
+        example_input_func = torch._to_functional_tensor(example_input, mirror_autograd_meta=True)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        result_gm = make_fx(f_wrapper(f))(example_input_func)
+        for node in result_gm.true_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        for node in result_gm.false_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
 
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
