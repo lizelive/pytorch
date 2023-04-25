@@ -1414,6 +1414,23 @@ class CPUReproTests(TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_non_contiguous_index_with_constant_stride(self):
+        def fn(x, rotary_dim):
+            def rotate_every_two(_x):
+                x1 = _x[:, :, :, ::2]
+                x2 = _x[:, :, :, 1::2]
+                _x = torch.stack((-x2, x1), dim=-1)
+                return _x.flatten(-2)
+
+            x_slice = x[:, :, :, :rotary_dim]
+            return rotate_every_two(x_slice)
+
+        metrics.reset()
+        x = torch.randn(1, 32, 16, 256)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x, 64), opt_fn(x, 64)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
             b = a[[0]]
