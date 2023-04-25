@@ -130,6 +130,11 @@ def _allowed_function_ids():
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
 
+    # TODO We can't import this at top level because of circular dependency.
+    # We also need this to load before finding allowed torch functions as previous
+    # dynamo assumption was that all the necessary modules were loaded before.
+    import torch._export.constraints
+
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
         # torch.nn.modules.rnn is disallowed because these modules internally

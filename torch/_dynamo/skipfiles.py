@@ -30,7 +30,6 @@ import unittest
 import weakref
 
 import torch
-import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 import torch.ao.quantization._pt2e.qat_utils
 
@@ -121,7 +120,9 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-FILENAME_ALLOWLIST |= {_export_constraints.__file__}
+
+# This is to avoid circular dependency.
+FILENAME_ALLOWLIST |= {_module_dir(torch) + "_export/constraints.py"}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
