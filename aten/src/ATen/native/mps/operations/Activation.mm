@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -712,23 +713,39 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
   if (output.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + c10::str(approximate);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
+    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + std::to_string(approximate_type);
+    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    if (!cachedGraph) {
+      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-      MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
-        outputTensor = tanh(mpsGraph, inputTensor);
-      } else {
-        outputTensor = normcdf(mpsGraph, inputTensor);
-      }
-      outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor secondaryTensor:inputTensor name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
+
+          MPSGraphTensor* outputTensor = nil;
+          if (approximate_type == GeluType::Tanh) {
+            outputTensor = tanh(mpsGraph, inputTensor);
+          } else {
+            outputTensor = normcdf(mpsGraph, inputTensor);
+          }
+          outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor secondaryTensor:inputTensor name:nil];
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
+    }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
