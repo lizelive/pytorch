@@ -108,6 +108,23 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
+
+    try:
+        from torch.distributed import _functional_collectives
+
+        remove.extend(
+            [
+                _functional_collectives.all_reduce,
+                _functional_collectives.all_gather_tensor,
+                _functional_collectives.reduce_scatter_tensor,
+                _functional_collectives._expand_group,
+                _functional_collectives._maybe_wrap_tensor,
+                _functional_collectives._are_we_tracing,
+            ]
+        )
+    except ImportError:
+        pass
+
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
@@ -146,6 +163,7 @@ def _allowed_function_ids():
             "torch._C.inductor.",
             "torch.fx.",
             "torch.distributed.fsdp.",
+            "torch.distributed._functional_collectives.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -255,6 +273,7 @@ def is_allowed(obj):
     # in those cases
     if id(obj) in _disallowed_function_ids:
         return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
