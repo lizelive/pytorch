@@ -18,4 +18,10 @@ static int _PyFrame_OpAlreadyRan(
 
 int THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame* frame);
 
+PyFunctionObject* _PyFunction_CopyWithNewCode(
+    PyFunctionObject* o,
+    PyCodeObject* code);
+
+void _PyFrame_Clear(_PyInterpreterFrame* frame);
+
 #endif

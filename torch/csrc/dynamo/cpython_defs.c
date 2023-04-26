@@ -135,4 +135,82 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     return 0;
 }
 
+// e.g. COPY_FIELD(op, o, globals) becomes
+// PY_XINCREF((o)->func_globals);
+// (op)->func_globals = (o)->func_globals;
+#define COPY_FIELD(f1, f2, field) \
+  Py_XINCREF((f2)->func_##field); \
+  (f1)->func_##field = (f2)->func_##field;
+
+// Not actually copied from CPython, but loosely based on
+// https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/funcobject.c
+// Makes a new PyFunctionObject copy of `o`, but with the code object fields
+// determined from `code`.
+// Ensure that all fields defined in the PyFunctionObject struct in
+// https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Include/cpython/funcobject.h
+// are accounted for.
+PyFunctionObject *
+_PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
+{
+  PyFunctionObject *op = PyObject_GC_New(PyFunctionObject, &PyFunction_Type);
+  if (op == NULL) {
+    return NULL;
+  }
+  Py_XINCREF(code);
+  op->func_code = (PyObject *) code;
+  Py_XINCREF(code->co_name);
+  op->func_name = code->co_name;
+  Py_XINCREF(code->co_qualname);
+  op->func_qualname = code->co_qualname;
+  COPY_FIELD(op, o, globals);
+  COPY_FIELD(op, o, builtins);
+  COPY_FIELD(op, o, defaults);
+  COPY_FIELD(op, o, kwdefaults);
+  COPY_FIELD(op, o, closure);
+  COPY_FIELD(op, o, doc);
+  COPY_FIELD(op, o, dict);
+  COPY_FIELD(op, o, weakreflist);
+  COPY_FIELD(op, o, module);
+  COPY_FIELD(op, o, annotations);
+  op->vectorcall = o->vectorcall;
+  op->func_version = o->func_version;
+  PyObject_GC_Track(op);
+  return op;
+}
+
+// From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L120
+void
+_PyFrame_Clear(_PyInterpreterFrame *frame)
+{
+    /* It is the responsibility of the owning generator/coroutine
+     * to have cleared the enclosing generator, if any. */
+    assert(frame->owner != FRAME_OWNED_BY_GENERATOR ||
+        _PyFrame_GetGenerator(frame)->gi_frame_state == FRAME_CLEARED);
+    // GH-99729: Clearing this frame can expose the stack (via finalizers). It's
+    // crucial that this frame has been unlinked, and is no longer visible:
+    assert(_PyThreadState_GET()->cframe->current_frame != frame);
+    // DYNAMO: Below line is an addition. We only expect to clear
+    // shadow frames, which do not have a frame_obj created.
+    assert(frame->frame_obj == NULL);
+    // DYNAMO: below lines are commented out.
+    // if (frame->frame_obj) {
+    //     PyFrameObject *f = frame->frame_obj;
+    //     frame->frame_obj = NULL;
+    //     if (Py_REFCNT(f) > 1) {
+    //         take_ownership(f, frame);
+    //         Py_DECREF(f);
+    //         return;
+    //     }
+    //     Py_DECREF(f);
+    // }
+    assert(frame->stacktop >= 0);
+    for (int i = 0; i < frame->stacktop; i++) {
+        Py_XDECREF(frame->localsplus[i]);
+    }
+    Py_XDECREF(frame->frame_obj);
+    Py_XDECREF(frame->f_locals);
+    Py_DECREF(frame->f_func);
+    Py_DECREF(frame->f_code);
+}
+
 #endif
