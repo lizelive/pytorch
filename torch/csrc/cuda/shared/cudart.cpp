@@ -84,6 +84,12 @@ void initCudartBindings(PyObject* module) {
       });
   cudart.def(
       "cuda"
+      "RuntimeGetVersion",
+      [](intptr_t ptr) -> cudaError_t {
+        return C10_CUDA_ERROR_HANDLED(cudaRuntimeGetVersion((int*)ptr));
+      });
+  cudart.def(
+      "cuda"
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
         return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
